@@ -3,7 +3,7 @@ type: elasticsearch
 status:
   class: exporter
   stability:
-    beta: [traces, logs]
+    beta: [traces, logs, metrics]
   distributions: [contrib, observiq]
   codeowners:
     active: [JaredTan95]

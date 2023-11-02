@@ -10,4 +10,5 @@ const (
 	Type            = "elasticsearch"
 	TracesStability = component.StabilityLevelBeta
 	LogsStability   = component.StabilityLevelBeta
+	MetricsStability   = component.StabilityLevelBeta
 )
