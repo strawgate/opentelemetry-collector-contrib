@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.uber.org/multierr"
 )
@@ -17,7 +18,21 @@ var (
 	errNegativeMaxObjectSize       = errors.New("max_object_size cannot be negative")
 	errReadTimeoutExceedsMaxValue  = errors.New("the duration specified for read_timeout exceeds the maximum allowed value of 60s")
 	errWriteTimeoutExceedsMaxValue = errors.New("the duration specified for write_timeout exceeds the maximum allowed value of 60s")
+	errEncodingAndParseFormat      = errors.New("encoding and parse_format cannot be used together")
 )
+
+// Encoding defines the encoding extension configuration for parsing uploaded objects.
+type Encoding struct {
+	// Extension is the component ID of the encoding extension to use for unmarshaling logs.
+	// Supported extensions include:
+	// - encoding/json_log: For JSON and NDJSON log formats
+	// - encoding/awslogs: For AWS log formats (CloudWatch, VPC Flow Logs, S3 Access Logs, etc.)
+	Extension component.ID `mapstructure:"extension"`
+
+	// Suffix is an optional file suffix filter. Only objects with keys ending in this suffix
+	// will be processed by the encoding extension. Leave empty to process all objects.
+	Suffix string `mapstructure:"suffix"`
+}
 
 // Config defines configuration for the S3 receiver.
 type Config struct {
@@ -32,7 +47,13 @@ type Config struct {
 	// BucketName restricts uploads to a specific bucket (empty = accept all)
 	BucketName string `mapstructure:"bucket_name"`
 
-	// ParseFormat specifies how to interpret object bodies: "lines", "json", or "auto"
+	// Encoding specifies an encoding extension to use for parsing uploaded objects.
+	// When set, this takes precedence over parse_format.
+	Encoding *Encoding `mapstructure:"encoding"`
+
+	// ParseFormat specifies how to interpret object bodies: "lines", "json", or "auto".
+	// This is ignored if Encoding is set.
+	// Deprecated: Use encoding extension instead for better format support.
 	ParseFormat string `mapstructure:"parse_format"`
 
 	// AutoDecompress enables automatic gzip detection and decompression
@@ -52,6 +73,11 @@ func (cfg *Config) Validate() error {
 
 	if cfg.Endpoint == "" {
 		errs = multierr.Append(errs, errMissingEndpointFromConfig)
+	}
+
+	// Encoding and parse_format are mutually exclusive
+	if cfg.Encoding != nil && cfg.ParseFormat != "" {
+		errs = multierr.Append(errs, errEncodingAndParseFormat)
 	}
 
 	if cfg.ParseFormat != "" && cfg.ParseFormat != "lines" &&

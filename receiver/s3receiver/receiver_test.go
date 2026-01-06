@@ -16,6 +16,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -38,7 +39,7 @@ func TestPutObjectEmitsLogs(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -83,7 +84,7 @@ func TestJSONLogParsing(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -123,7 +124,7 @@ func TestAutoParseFormat(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -157,7 +158,7 @@ func TestAutoParseFormatFallsBackToLines(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -193,7 +194,7 @@ func TestGzipDecompression(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -237,7 +238,7 @@ func TestBucketRestriction(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -274,7 +275,7 @@ func TestMaxObjectSize(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -369,6 +370,29 @@ func TestConfigValidation(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "encoding and parse_format mutually exclusive",
+			config: func() Config {
+				cfg := Config{
+					Encoding:    &Encoding{Extension: component.MustNewID("json_log")},
+					ParseFormat: "json",
+				}
+				cfg.Endpoint = "localhost:9000"
+				return cfg
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid config with encoding only",
+			config: func() Config {
+				cfg := Config{
+					Encoding: &Encoding{Extension: component.MustNewID("json_log")},
+				}
+				cfg.Endpoint = "localhost:9000"
+				return cfg
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -439,7 +463,7 @@ func TestMetadataHeaders(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()
@@ -477,7 +501,7 @@ func TestEmptyLinesSkipped(t *testing.T) {
 		},
 	}
 
-	backend := newLogEmittingBackend(logger, sink, cfg)
+	backend := newLogEmittingBackend(logger, sink, cfg, nil, "")
 	faker := gofakes3.New(backend, gofakes3.WithAutoBucket(true))
 	ts := httptest.NewServer(faker.Server())
 	defer ts.Close()

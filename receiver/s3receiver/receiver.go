@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
@@ -75,8 +76,27 @@ func (r *s3LogReceiver) Start(ctx context.Context, host component.Host) error {
 
 	r.settings.Logger.Info("Starting S3 log receiver", zap.String("endpoint", r.cfg.Endpoint))
 
+	// Look up encoding extension if configured
+	var unmarshaler plog.Unmarshaler
+	var encodingSuffix string
+	if r.cfg.Encoding != nil {
+		extensions := host.GetExtensions()
+		ext, ok := extensions[r.cfg.Encoding.Extension]
+		if !ok {
+			return fmt.Errorf("encoding extension %q not found", r.cfg.Encoding.Extension)
+		}
+		unmarshaler, ok = ext.(plog.Unmarshaler)
+		if !ok {
+			return fmt.Errorf("encoding extension %q does not implement plog.Unmarshaler", r.cfg.Encoding.Extension)
+		}
+		encodingSuffix = r.cfg.Encoding.Suffix
+		r.settings.Logger.Info("Using encoding extension for log parsing",
+			zap.String("extension", r.cfg.Encoding.Extension.String()),
+			zap.String("suffix", encodingSuffix))
+	}
+
 	// Create custom backend that emits logs
-	r.backend = newLogEmittingBackend(r.settings.Logger, r.consumer, r.cfg)
+	r.backend = newLogEmittingBackend(r.settings.Logger, r.consumer, r.cfg, unmarshaler, encodingSuffix)
 
 	// Create gofakes3 server with auto-bucket creation enabled
 	faker := gofakes3.New(r.backend,

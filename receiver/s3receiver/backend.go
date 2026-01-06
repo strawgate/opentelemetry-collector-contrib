@@ -27,17 +27,23 @@ type logEmittingBackend struct {
 	consumer consumer.Logs
 	config   *Config
 
+	// Encoding extension unmarshaler (optional)
+	unmarshaler    plog.Unmarshaler
+	encodingSuffix string
+
 	// Track created buckets (for ListBuckets)
 	mu      sync.RWMutex
 	buckets map[string]time.Time
 }
 
-func newLogEmittingBackend(logger *zap.Logger, consumer consumer.Logs, cfg *Config) *logEmittingBackend {
+func newLogEmittingBackend(logger *zap.Logger, consumer consumer.Logs, cfg *Config, unmarshaler plog.Unmarshaler, encodingSuffix string) *logEmittingBackend {
 	return &logEmittingBackend{
-		logger:   logger,
-		consumer: consumer,
-		config:   cfg,
-		buckets:  make(map[string]time.Time),
+		logger:         logger,
+		consumer:       consumer,
+		config:         cfg,
+		unmarshaler:    unmarshaler,
+		encodingSuffix: encodingSuffix,
+		buckets:        make(map[string]time.Time),
 	}
 }
 
@@ -86,8 +92,25 @@ func (b *logEmittingBackend) PutObject(
 		}
 	}
 
-	// Parse data into log records and emit
-	logs := b.parseToLogs(bucketName, key, meta, data)
+	// Parse data into log records
+	var logs plog.Logs
+	var parseErr error
+
+	// Use encoding extension if configured and suffix matches
+	if b.unmarshaler != nil && (b.encodingSuffix == "" || strings.HasSuffix(key, b.encodingSuffix)) {
+		logs, parseErr = b.unmarshaler.UnmarshalLogs(data)
+		if parseErr != nil {
+			b.logger.Error("Failed to unmarshal logs using encoding extension",
+				zap.Error(parseErr),
+				zap.String("key", key))
+			return gofakes3.PutObjectResult{VersionID: ""}, nil
+		}
+		// Add resource attributes from config
+		b.addResourceAttributes(logs, bucketName, key, meta)
+	} else {
+		// Fall back to built-in parsing
+		logs = b.parseToLogs(bucketName, key, meta, data)
+	}
 
 	if logs.LogRecordCount() > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -362,4 +385,29 @@ func (b *logEmittingBackend) ForceDeleteBucket(name string) error {
 // CopyObject - not supported
 func (b *logEmittingBackend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
 	return gofakes3.CopyObjectResult{}, gofakes3.ErrNotImplemented
+}
+
+// addResourceAttributes adds S3 metadata and configured resource attributes to logs
+// parsed by an encoding extension
+func (b *logEmittingBackend) addResourceAttributes(logs plog.Logs, bucket, key string, meta map[string]string) {
+	for i := 0; i < logs.ResourceLogs().Len(); i++ {
+		resource := logs.ResourceLogs().At(i).Resource()
+
+		// Add configured resource attributes
+		for k, v := range b.config.ResourceAttributes {
+			resource.Attributes().PutStr(k, v)
+		}
+
+		// Add S3 object information
+		resource.Attributes().PutStr("s3.bucket", bucket)
+		resource.Attributes().PutStr("s3.key", key)
+
+		// Add any x-amz-meta-* headers as resource attributes
+		for k, v := range meta {
+			if strings.HasPrefix(strings.ToLower(k), "x-amz-meta-") {
+				attrKey := strings.TrimPrefix(strings.ToLower(k), "x-amz-meta-")
+				resource.Attributes().PutStr("s3.meta."+attrKey, v)
+			}
+		}
+	}
 }
