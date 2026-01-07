@@ -1,0 +1,13 @@
+type: awss3putobject
+
+status:
+  class: receiver
+  stability:
+    alpha: [logs]
+  distributions: [contrib]
+  codeowners:
+    active: []
+
+tests:
+  config:
+    endpoint: 127.0.0.1:9000
