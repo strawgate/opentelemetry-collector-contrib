@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package s3receiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/s3receiver"
+package awss3putobjectreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awss3putobjectreceiver"
 
 import (
 	"bufio"
@@ -157,7 +157,7 @@ func (b *logEmittingBackend) parseToLogs(bucket, key string, meta map[string]str
 	}
 
 	scopeLogs := resourceLogs.ScopeLogs().AppendEmpty()
-	scopeLogs.Scope().SetName("s3receiver")
+	scopeLogs.Scope().SetName("awss3putobjectreceiver")
 	scopeLogs.Scope().SetVersion("1.0.0")
 
 	now := pcommon.NewTimestampFromTime(time.Now())

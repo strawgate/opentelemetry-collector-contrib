@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package s3receiver
+package awss3putobjectreceiver
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/collector/receiver/receivertest"
 	"go.uber.org/zap/zaptest"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/s3receiver/internal/metadata"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awss3putobjectreceiver/internal/metadata"
 )
 
 func TestPutObjectEmitsLogs(t *testing.T) {

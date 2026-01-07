@@ -1,4 +1,4 @@
-type: s3
+type: awss3putobject
 
 status:
   class: receiver

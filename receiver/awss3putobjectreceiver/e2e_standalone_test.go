@@ -3,7 +3,7 @@
 
 //go:build e2e
 
-package s3receiver
+package awss3putobjectreceiver
 
 import (
 	"bytes"
@@ -22,7 +22,7 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/s3receiver/internal/metadata"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awss3putobjectreceiver/internal/metadata"
 )
 
 // getReceiverAddr extracts the listening address from the receiver
