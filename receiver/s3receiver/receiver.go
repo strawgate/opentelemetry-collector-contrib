@@ -34,6 +34,7 @@ type s3LogReceiver struct {
 	backend    *logEmittingBackend
 	shutdownWG sync.WaitGroup
 	obsrecv    *receiverhelper.ObsReport
+	addr       string // actual listening address after Start()
 }
 
 func newLogsReceiver(params receiver.Settings, cfg Config, consumer consumer.Logs) (receiver.Logs, error) {
@@ -109,9 +110,12 @@ func (r *s3LogReceiver) Start(ctx context.Context, host component.Host) error {
 		return fmt.Errorf("failed to bind to %s: %w", r.cfg.Endpoint, err)
 	}
 
+	// Store the actual listening address (useful when using port 0)
+	r.addr = listener.Addr().String()
+
 	// Create HTTP server
 	r.server = &http.Server{
-		Addr:              r.cfg.Endpoint,
+		Addr:              r.addr,
 		Handler:           faker.Server(),
 		ReadTimeout:       r.cfg.ReadTimeout,
 		ReadHeaderTimeout: r.cfg.ReadTimeout,
