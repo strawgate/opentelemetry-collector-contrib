@@ -153,6 +153,63 @@ By default, the supervisor will use `/var/lib/otelcol/supervisor` on posix syste
 
 This directory will be created on supervisor startup if it does not exist.
 
+## Persisted OpAMP connection settings
+
+With the `cmd.opampsupervisor.PersistOpAMPConnectionSettings` feature gate enabled, OpAMP connection settings offered by the server are handled as the [OpAMP specification](https://github.com/open-telemetry/opamp-spec/blob/main/specification.md#opamp-connection-setting-offer-flow) describes:
+
+1. The offer is saved in the storage directory as a candidate.
+2. The Supervisor reconnects with it, retrying failed attempts. If the server accepts a connection (a completed WebSocket upgrade, or a successful plain-HTTP response) within 60 seconds, the offer replaces the previous settings. Otherwise the previous settings are restored.
+3. The accepted settings are used after a restart. A candidate left by a Supervisor that stopped mid-offer is verified again at startup.
+
+With `reports_connection_settings_status`, the Supervisor reports whether each offer is being applied, was applied, or failed.
+
+```yaml
+capabilities:
+  accepts_opamp_connection_settings: true
+  reports_connection_settings_status: true
+```
+
+Run the Supervisor with `--feature-gates=cmd.opampsupervisor.PersistOpAMPConnectionSettings`.
+
+The `server` settings in the config file are where the Supervisor starts. If they change, for example when a new token is configured in `server.headers`, settings offered by the server are discarded and the config file's settings are used. The comparison covers the endpoint, headers, TLS settings and the `server.auth` reference, but not the auth extension's own settings or the contents of certificate files.
+
+Headers from an auth extension (`server.auth`) are applied after offered headers, so an `Authorization` header from an extension replaces an offered one. To let the server replace the initial token, set it in `server.headers`, for example from a file:
+
+```yaml
+server:
+  headers:
+    Authorization: "Bearer ${file:/run/credentials/opampsupervisor.service/opamp-token}"
+```
+
+### Protecting persisted secrets
+
+By default, offered settings, including tokens and TLS private keys, are stored unencrypted. On Linux and macOS the files are readable only by the Supervisor's user; on Windows they are only as protected as the storage directory, so use `dpapi` there. `storage.secrets.key_source` encrypts them with AES-256-GCM using a key kept by the operating system:
+
+| `key_source`         | Where the key is kept                                                                                                        | Platform |
+|----------------------|------------------------------------------------------------------------------------------------------------------------------|----------|
+| `keychain`           | A macOS keychain, by default the System keychain (`keychain_path`), which requires running as root. Created on first use.     | macOS    |
+| `dpapi`              | A file in the storage directory protected with the Windows Data Protection API for the Supervisor's account. Created on first use. | Windows  |
+| `systemd_credential` | A systemd credential, e.g. one loaded with `LoadCredentialEncrypted=`. Raw or base64-encoded, 32 bytes.                       | Linux    |
+| `env`                | An environment variable holding a base64-encoded 32-byte key.                                                                | All      |
+
+`key_name` names the keychain service, the DPAPI key file, the credential or the environment variable. The defaults are `io.opentelemetry.opampsupervisor`, `secrets.key.dpapi`, `opamp-supervisor-secrets-key` and `OPAMP_SUPERVISOR_SECRETS_KEY`.
+
+```yaml
+storage:
+  directory: /var/lib/otelcol/supervisor
+  secrets:
+    key_source: systemd_credential
+```
+
+```ini
+[Service]
+LoadCredentialEncrypted=opamp-supervisor-secrets-key:/etc/credstore.encrypted/opamp-supervisor-secrets-key
+```
+
+The credential above can be created with `head -c 32 /dev/urandom | systemd-creds encrypt --name=opamp-supervisor-secrets-key - /etc/credstore.encrypted/opamp-supervisor-secrets-key`.
+
+If the key cannot be loaded, the Supervisor does not start. Settings stored before a key source was configured are encrypted the next time they are read. Encryption keeps the settings from being read; it does not protect against someone who can write to the storage directory.
+
 ## Healthcheck
 
 The Supervisor can be configured to expose a healthcheck endpoint that can be used to determine whether the Supervisor is running and healthy. This can be configured in the Supervisor configuration file:
@@ -254,6 +311,7 @@ For a list of open issues related to the Supervisor, see [these issues](https://
 | ReportsStatus                  | <https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/38729> |
 | ReportsRemoteConfig            | ✅                                                                               |
 | ReportsAvailableComponents     | ✅                                                                               |
+| ReportsConnectionSettingsStatus | ✅ with the `cmd.opampsupervisor.PersistOpAMPConnectionSettings` feature gate   |
 
 ### Supervisor specification features
 

@@ -133,3 +133,25 @@ func TestPersistentState_SetLastRemoteConfigStatus(t *testing.T) {
 	}, loadedState.GetLastRemoteConfigStatus())
 	require.FileExists(t, f)
 }
+
+func TestPersistentState_SetOpAMPConnectionSettingsOffer(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "state.yaml")
+	state, err := createNewPersistentState(f, "", zap.NewNop())
+	require.NoError(t, err)
+
+	applied := &protobufs.ConnectionSettingsStatus{
+		LastConnectionSettingsHash: []byte("offer-1"),
+		Status:                     protobufs.ConnectionSettingsStatuses_ConnectionSettingsStatuses_APPLIED,
+	}
+	require.NoError(t, state.SetOpAMPConnectionSettingsOffer("bootstrap-1", applied))
+
+	// An offer without a hash keeps the previous status.
+	require.NoError(t, state.SetOpAMPConnectionSettingsOffer("bootstrap-2", &protobufs.ConnectionSettingsStatus{
+		Status: protobufs.ConnectionSettingsStatuses_ConnectionSettingsStatuses_APPLYING,
+	}))
+
+	loaded, err := loadPersistentState(f, zap.NewNop())
+	require.NoError(t, err)
+	require.Equal(t, "bootstrap-2", loaded.OpAMPConnectionSettings.BootstrapHash)
+	require.Equal(t, applied, loaded.GetLastConnectionSettingsStatus())
+}

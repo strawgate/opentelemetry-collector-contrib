@@ -9,6 +9,14 @@ status:
     active: [evan-bradley, atoulme, tigrannajaryan, douglascamata, dpaasman00]
 
 feature_gates:
+  - id: cmd.opampsupervisor.PersistOpAMPConnectionSettings
+    stage: alpha
+    description: >-
+      When enabled, the opampsupervisor persists server-offered OpAMP connection settings, applies them only after
+      the server accepts a connection made with them, reverts to the previous settings otherwise, and keeps using
+      them across restarts.
+    from_version: v0.161.0
+    reference_url: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/21078
   - id: opampsupervisor.Extensions
     stage: alpha
     description: >-

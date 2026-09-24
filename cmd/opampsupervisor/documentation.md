@@ -8,6 +8,7 @@ This component has the following feature gates:
 
 | Feature Gate | Stage | Description | From Version | To Version | Reference |
 | ------------ | ----- | ----------- | ------------ | ---------- | --------- |
+| `cmd.opampsupervisor.PersistOpAMPConnectionSettings` | alpha | When enabled, the opampsupervisor persists server-offered OpAMP connection settings, applies them only after the server accepts a connection made with them, reverts to the previous settings otherwise, and keeps using them across restarts. | v0.161.0 | N/A | [Link](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/21078) |
 | `opampsupervisor.Extensions` | alpha | When enabled, the opampsupervisor can be configured with and use specific extensions from the collector ecosystem. | v0.153.0 | N/A | [Link](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47690) |
 
 For more information about feature gates, see the [Feature Gates](https://github.com/open-telemetry/opentelemetry-collector/blob/main/featuregate/README.md) documentation.

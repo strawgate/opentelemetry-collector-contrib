@@ -6,6 +6,14 @@ import (
 	"go.opentelemetry.io/collector/featuregate"
 )
 
+var CmdOpampsupervisorPersistOpAMPConnectionSettingsFeatureGate = featuregate.GlobalRegistry().MustRegister(
+	"cmd.opampsupervisor.PersistOpAMPConnectionSettings",
+	featuregate.StageAlpha,
+	featuregate.WithRegisterDescription("When enabled, the opampsupervisor persists server-offered OpAMP connection settings, applies them only after the server accepts a connection made with them, reverts to the previous settings otherwise, and keeps using them across restarts."),
+	featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/21078"),
+	featuregate.WithRegisterFromVersion("v0.161.0"),
+)
+
 var OpampsupervisorExtensionsFeatureGate = featuregate.GlobalRegistry().MustRegister(
 	"opampsupervisor.Extensions",
 	featuregate.StageAlpha,

@@ -32,9 +32,7 @@ import (
 	"github.com/open-telemetry/opamp-go/server"
 	serverTypes "github.com/open-telemetry/opamp-go/server/types"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configtelemetry"
-	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
 	"go.opentelemetry.io/contrib/bridges/otelzap"
@@ -215,6 +213,10 @@ type Supervisor struct {
 	// extensions hosts configured supervisor extensions. nil when none are configured.
 	extensions *extensions.Extensions
 
+	// offeredConnSettings persists server-offered OpAMP connection settings.
+	// nil unless the feature gate and accepts_opamp_connection_settings are enabled.
+	offeredConnSettings *offeredConnectionSettings
+
 	// passthroughLogBuffer keeps the latest Collector log lines when passthrough logging is enabled.
 	passthroughLogBuffer *logRingBuffer
 	passthroughLogMu     sync.Mutex
@@ -248,6 +250,9 @@ func NewSupervisor(ctx context.Context, logger *zap.Logger, cfg config.Superviso
 			"extensions are configured but the %q feature gate is not enabled; enable it with --feature-gates=%s",
 			metadata.OpampsupervisorExtensionsFeatureGate.ID(), metadata.OpampsupervisorExtensionsFeatureGate.ID(),
 		)
+	}
+	if err := validateOfferedConnectionSettingsConfig(cfg); err != nil {
+		return nil, err
 	}
 
 	if err := s.createTemplates(); err != nil {
@@ -376,6 +381,16 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Before anything connects to the OpAMP server.
+	pendingConnSettings, err := s.loadOfferedConnectionSettings()
+	if err != nil {
+		return err
+	}
+	if pendingConnSettings != nil {
+		// Released by finishPendingConnectionSettings, so offers wait for it.
+		s.offeredConnSettings.mu.Lock()
+	}
+
 	if s.config.Capabilities.AcceptsPackages {
 		s.telemetrySettings.Logger.Error(
 			"accepts_packages capability is not yet fully implemented. " +
@@ -406,6 +421,9 @@ func (s *Supervisor) Start(ctx context.Context) error {
 
 	if err = s.startOpAMP(); err != nil {
 		return fmt.Errorf("cannot start OpAMP client: %w", err)
+	}
+	if pendingConnSettings != nil {
+		go s.finishPendingConnectionSettings(pendingConnSettings)
 	}
 
 	s.configWriteMu.Lock()
@@ -710,16 +728,23 @@ func (s *Supervisor) startOpAMPClient() error {
 		TLSConfig:          tlsConfig,
 		InstanceUid:        types.InstanceUid(s.persistentState.InstanceID),
 		RemoteConfigStatus: s.persistentState.GetLastRemoteConfigStatus(),
+		// Only set when offered connection settings are persisted.
+		LastConnectionSettingsStatus: s.lastConnectionSettingsStatus(),
 		Callbacks: types.Callbacks{
 			OnConnect: s.onConnect,
 			OnConnectFailed: func(_ context.Context, err error) {
 				s.telemetrySettings.Logger.Error("Failed to connect to the OpAMP server", zap.Error(err))
+				s.observeOpAMPConnectFailed(err)
 			},
 			OnError: func(_ context.Context, err *protobufs.ServerErrorResponse) {
 				s.telemetrySettings.Logger.Error("Server returned an error response", zap.String("message", err.ErrorMessage))
 			},
 			OnMessage: s.onMessage,
 			OnOpampConnectionSettings: func(ctx context.Context, settings *protobufs.OpAMPConnectionSettings) error {
+				if s.offeredConnSettings != nil {
+					go s.onOfferedConnectionSettings(settings, s.offeredConnSettings.lastOfferHash())
+					return nil
+				}
 				//nolint:errcheck
 				go s.onOpampConnectionSettings(ctx, settings)
 				return nil
@@ -1054,16 +1079,9 @@ func (s *Supervisor) stopOpAMPClient() error {
 	return nil
 }
 
-func (*Supervisor) getHeadersFromSettings(protoHeaders *protobufs.Headers) http.Header {
-	headers := make(http.Header)
-	for _, header := range protoHeaders.Headers {
-		headers.Add(header.Key, header.Value)
-	}
-	return headers
-}
-
 func (s *Supervisor) onConnect(ctx context.Context) {
 	s.telemetrySettings.Logger.Info("Connected to the OpAMP server.")
+	s.observeOpAMPConnected()
 	s.metrics.SetCollectorFallbackStatus(ctx, false)
 
 	if s.initialOpampConnSuccess.Load() {
@@ -1096,32 +1114,8 @@ func (s *Supervisor) onOpampConnectionSettings(_ context.Context, settings *prot
 
 	// Preserve the configured auth extension reference across server-pushed
 	// connection settings; the server only updates endpoint/headers/TLS.
-	newServerConfig := config.OpAMPServer{
-		Auth: s.config.Server.Auth,
-	}
-
-	if settings.DestinationEndpoint != "" {
-		newServerConfig.Endpoint = settings.DestinationEndpoint
-	}
-	if settings.Headers != nil {
-		newServerConfig.Headers = s.getHeadersFromSettings(settings.Headers)
-	}
-	if settings.Certificate != nil {
-		if len(settings.Certificate.CaCert) != 0 {
-			newServerConfig.TLS.CAPem = configopaque.String(settings.Certificate.CaCert)
-		}
-		if len(settings.Certificate.Cert) != 0 {
-			newServerConfig.TLS.CertPem = configopaque.String(settings.Certificate.Cert)
-		}
-		if len(settings.Certificate.PrivateKey) != 0 {
-			newServerConfig.TLS.KeyPem = configopaque.String(settings.Certificate.PrivateKey)
-		}
-	} else {
-		newServerConfig.TLS = configtls.NewDefaultClientConfig()
-		newServerConfig.TLS.InsecureSkipVerify = true
-	}
-
-	if err := newServerConfig.Validate(); err != nil {
+	newServerConfig, err := newServerConfigFromOpAMPSettings(s.config.Server.Auth, settings)
+	if err != nil {
 		s.telemetrySettings.Logger.Error("New OpAMP settings resulted in invalid configuration", zap.Error(err))
 		return err
 	}
@@ -2519,6 +2513,8 @@ func (s *Supervisor) onMessage(ctx context.Context, msg *types.MessageData) {
 	ctx, span := s.getTracer().Start(ctx, "onMessage")
 	defer span.End()
 	configChanged := false
+
+	s.observeConnectionSettingsOffer(msg.OfferedConnectionsSettingsHash)
 
 	if msg.AgentIdentification != nil {
 		configChanged = s.processAgentIdentificationMessage(msg.AgentIdentification) || configChanged

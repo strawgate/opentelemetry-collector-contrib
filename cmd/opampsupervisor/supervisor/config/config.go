@@ -84,8 +84,71 @@ func (s *Supervisor) Validate() error {
 type Storage struct {
 	// Directory is the directory where the Supervisor will store its data.
 	Directory string `mapstructure:"directory"`
+	// Secrets configures how secrets persisted in Directory, such as
+	// server-offered OpAMP connection credentials, are protected at rest.
+	Secrets Secrets `mapstructure:"secrets"`
 	// prevent unkeyed literal initialization
 	_ struct{}
+}
+
+// Key sources for Secrets.KeySource.
+const (
+	// SecretsKeySourceNone stores secrets unencrypted, readable only by the
+	// Supervisor's user (0600).
+	SecretsKeySourceNone = ""
+	// SecretsKeySourceEnv reads a base64-encoded 32-byte key from an
+	// environment variable.
+	SecretsKeySourceEnv = "env"
+	// SecretsKeySourceSystemdCredential reads the key from a systemd
+	// credential ($CREDENTIALS_DIRECTORY), e.g. one provisioned with
+	// LoadCredentialEncrypted=.
+	SecretsKeySourceSystemdCredential = "systemd_credential" //nolint:gosec // G101: the name of a key source, not a credential
+	// SecretsKeySourceKeychain keeps the key in a macOS keychain, by default
+	// the System keychain.
+	SecretsKeySourceKeychain = "keychain"
+	// SecretsKeySourceDPAPI keeps the key in a file protected with the
+	// Windows Data Protection API for the Supervisor's account.
+	SecretsKeySourceDPAPI = "dpapi"
+)
+
+// Secrets configures encryption of secrets the Supervisor persists. When a
+// key source is set, secrets are encrypted with AES-256-GCM using a key held
+// by that source; only the key is kept in the operating system's store.
+type Secrets struct {
+	// KeySource is where the encryption key is kept. Empty (the default)
+	// stores secrets unencrypted.
+	KeySource string `mapstructure:"key_source"`
+	// KeyName identifies the key within its source: the environment variable
+	// (env), the credential name (systemd_credential), the keychain service
+	// (keychain) or the key file name in the storage directory (dpapi).
+	// Defaults depend on the source.
+	KeyName string `mapstructure:"key_name"`
+	// KeychainPath is the keychain holding the key (keychain only). Defaults
+	// to the System keychain, which requires running as root.
+	KeychainPath string `mapstructure:"keychain_path"`
+	// prevent unkeyed literal initialization
+	_ struct{}
+}
+
+func (s Secrets) Validate() error {
+	var requiredOS string
+	switch s.KeySource {
+	case SecretsKeySourceNone, SecretsKeySourceEnv:
+		return nil
+	case SecretsKeySourceSystemdCredential:
+		requiredOS = "linux"
+	case SecretsKeySourceKeychain:
+		requiredOS = "darwin"
+	case SecretsKeySourceDPAPI:
+		requiredOS = "windows"
+	default:
+		return fmt.Errorf("storage::secrets::key_source %q is not one of %q, %q, %q or %q",
+			s.KeySource, SecretsKeySourceEnv, SecretsKeySourceSystemdCredential, SecretsKeySourceKeychain, SecretsKeySourceDPAPI)
+	}
+	if runtime.GOOS != requiredOS {
+		return fmt.Errorf("storage::secrets::key_source %q is only supported on %s", s.KeySource, requiredOS)
+	}
+	return nil
 }
 
 // Capabilities is the set of capabilities that the Supervisor supports.
@@ -101,6 +164,10 @@ type Capabilities struct {
 	ReportsAvailableComponents     bool `mapstructure:"reports_available_components"`
 	ReportsHeartbeat               bool `mapstructure:"reports_heartbeat"`
 	AcceptsPackages                bool `mapstructure:"accepts_packages"`
+	// ReportsConnectionSettingsStatus reports whether server-offered OpAMP
+	// connection settings were applied. Requires accepts_opamp_connection_settings
+	// and the cmd.opampsupervisor.PersistOpAMPConnectionSettings feature gate.
+	ReportsConnectionSettingsStatus bool `mapstructure:"reports_connection_settings_status"`
 
 	// Deprecated: ReportsRemoteConfig has no effect. AcceptsRemoteConfig enables both the
 	// AcceptsRemoteConfig and ReportsRemoteConfig OpAMP capabilities. This field will be
@@ -152,6 +219,10 @@ func (c Capabilities) SupportedCapabilities() protobufs.AgentCapabilities {
 	}
 	if c.ReportsHeartbeat {
 		supportedCapabilities |= protobufs.AgentCapabilities_AgentCapabilities_ReportsHeartbeat
+	}
+
+	if c.ReportsConnectionSettingsStatus {
+		supportedCapabilities |= protobufs.AgentCapabilities_AgentCapabilities_ReportsConnectionSettingsStatus
 	}
 
 	// AcceptsPackages is not yet fully implemented. It is included here for completeness.
